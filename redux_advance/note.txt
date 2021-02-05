@@ -1,0 +1,7 @@
+action
+    - async kódot tud futtatni a react-thunk segítségével
+    - nem szabad túl sok álapot frissítésse foglalkoznia
+
+reducer
+    - tiszta (pure) szinkorn kódot
+    - core redux konepció: reducerek frissítik az állapotot (state)

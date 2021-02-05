@@ -1,0 +1,18 @@
+mi is az a state (állapot)
+1.) mit jelenítünk meg az oldalon,
+2.) felhasználó be van e jelentkezve
+3.) mely oldalakat engedélyezük látni a nem belépett felhasználóknak
+4.) események lefutása (pl modal)
+... stb.
+
+a state nagyon komplex is lehet, 
+ezért van szükségünk egy olyan állapotkezelőre,
+ahol központilag tudjuk elérni az állapotokat
+
+Redux flow megértése:
+Egy központi helyre mentjük az állapokoat.
+1. A komponensben elvégezzük az eseményt, amit elküldünk (dispatch), az Action-nek
+2. az Action előre informált csomagot, ami továbbküldi a Reducer-nek (ez csak egy üzenetküldő)
+3. A reducer egy egyszerű tiszta funkció (pure function) és felülírja a központi tárolónak az állapotát
+Hogyan juttatjuk el a frissített központi állapotokat a felhasználóhoz?
+4. Subscription model segítségével automatikusan elküldjüka  felhasználó felé ezt az állapotváltozást

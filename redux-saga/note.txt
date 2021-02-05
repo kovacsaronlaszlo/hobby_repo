@@ -1,0 +1,503 @@
+burgerbuilder applikáció részet fogjuk átírni kiszervezni redux sagaba
+
+413 installing redux-saga:
+    yarn add redux-saga
+    npm install --save redux-saga
+
+414 creating first saga
+    sagas hasonlóak mint a fv-ek, amiknek side-effect-jei vannak
+    használhatjuk: localstorage-nál, setTimeout-nál ...stb.
+    létre kell hozni egy újabb belső mappát a store mappában (jelen esetben ez legyen: sagas)
+    SAGAS:
+        auth.js: hogy tudunk ilyen authentikációs saga-t csinálni?
+                - logout fv kap egy action argumentumot
+                synkorn kódot fogunk ezzel kezelni
+                import {put} from 'redux.saga/effects';
+
+                import * as actionTypes from '../action';
+                
+                export function* logoutSaga(action) {
+                    yield localStorage.removeItem('token');
+                    yield localStorage.removeItem('expirationDate');
+                    yield localStorage.removeItem('userId');
+                    yield put({
+                        type: actionTypes.AUTH_LOGOUT
+                    })
+                }
+
+                a fenti kód nem egy normnál függvény, hanem egy generátor: function*
+                a generátorban használkt kódokat adddig nem futtatja le amíg az előző kód el nem lett végezve, 
+                ezt a yield kulcsszó segítségével tudjuk biztosítani
+
+415 hooking the Saga Up (to the Store and Actions)
+    ahhoz, hogy a Saga működjön, hozzá kell kapcsolnunk a store-hoz, ezt az index.js-ben tudjuk megoldani
+    index.js: ahhoz, hogy haszni is tudjuk, meg kell hívni egy middleware-the
+        ...
+        import createSagaMiddleware from 'redux-saga';
+        
+            !) persze importálni kell a saga-t amit létrehoztunk:
+        ...
+        import {logoutSaga} from './store/sagas/auth';
+        ...
+            !) egy változóban meg kell hívni a createSagaMiddleware-t:
+        ...
+        const sagaMiddleware = createSagaMiddleware();
+            !) majd ahol felépítjük a store-t, nem csak a thunk.-ot addjuk hozzá, hanem a sagaMiddleware-t is:
+        const store = createStore(rootReducer, comopseEnhancers(
+            applyMiddleware(thunk, sagaMiddleware);
+        ));
+
+            !) végezetűl, el kell indítani a saga-t, mivel már használjuk a store-ban:
+        sagaMiddleware.run(logoutSaga);
+
+416 Moving Logic from the Action Creator to a Saga
+    az auth.js fájlban kommenteljük ki a localStorage részeket, majd csináljunk egy új action typust, az actionTypes.js-ben:
+        ...
+        export const AUTH_INITIATE_LOGOUT = 'AUTH_INITIATE_LOGOUT';
+        ...
+    visszatérve az action/auth.js fájlba írjuk át a logout fv. actionType typusát a létrehozot típusra:
+        ...
+        export const logout = () => {
+            return {
+                type: actionTypes.AUTH_INITIATE_LOGOUT
+            }
+        }
+        ...
+        !) tehát akárhányszor dispatch-lem a logout-t, az AUTH_INITIATE_LOGOUT action fog lefutni
+    a követekző feladat, hogy hallgassunk erre az akcióra és lefuttassuk a logoutSaga generátort. 
+    Ehhez létrehozunk a saga mappában egy saga/index.js fájlt:
+        import {takeEvery} from 'redux-saga';   
+
+            !) takeEvery - biztosítja számunkra, hogy elkapjunk bizonyos akciókat és tegyünk valamit, amikor azok megtörténnek.
+
+        import * as actionTypes from '../action/actionType';
+        import {logoutSaga} from './auth';
+
+            !) ehhez segítségünkre lesz egy újabb generátor
+        
+        export function* wathcAuth(){
+            yield takeEvery(actionTypes.AUTH_INITIATE_LOGOUT, logoutSaga);
+        }
+
+            !) az index.js-ben a logoutSaga helyet pedig importálni fogjuk a most létrehozott generátor fv-t:
+        ...
+        import {wathcAuth} from './store/sagas';
+        ...
+            !) majd a msagaMiddleware-ben kicseréljük a logoutSaga-t a wathcAuth-ra!
+        ...
+        sagaMiddleware.run(wathcAuth);
+        ...
+
+417 Moving More Logic Into Saga
+    a pontos elhejezkedése a takeEvery függvénynek az effect mappában található:
+    import {takeEvery} from 'redux-saga/effects';
+
+    nézzük meg az action-ök között mit lehetne elmenteni a saga-ban:
+        authStart-nak nincsne mellékeffektje, tehát ez nem kell a saga-ba rakni!
+        az authSuccess és az authFail-t sem kel, mivel ezek is csak egy akciót hivnak meg (actionCrate-rok, akciókat hoznak léátre, indítanak el)
+        
+        ! az átláthatóság véget az action-ben érdemes az actionCreatorokat létrehozni és nem a saga-ban, tehát érdemes a sagaban lévő put metódusban
+        ! egy meghívott action meghívni:
+            action/auth.js:
+                ...
+                export const logoutSucceed = () => {
+                    retrun {
+                        type: actionType.AUTH_LOGOUT
+                    }
+                }
+                ...
+            saga/auth.js:
+                ...
+                import * as actions from '../actions/index';
+                ...
+                    yield put(actions.logoutSucceed()); // mivel használni akarjuk ezért futtatható modon kell használni, tehát () a meghívott művelet mellé adni
+                ...
+            actions/index.js:
+                eyport {
+                    ...
+                    logoutSucceed
+                } from './auth';
+                ...
+        a követekző a checkAuthTimeout, amit érdemes kiszervezni a saga-ba, mivel ennek van melékhatásai (setTimeout):
+        saga/auth.js:
+            ! hozzunk létre egy új generátor fv-t:
+                ! ahhot, hogy használni tudjuk a setTimeout fv, meg kell hívnunk egy segédfv-t:
+                import {delay} from 'redux-saga';
+                export function* checkAuthTimeoutSaga(action) {
+                    /*
+                    setTimeout(() => {
+                        dispatch(logout());
+                    }, expirationTime * 1000); */
+
+                    ! az alábbi kód ugyan azt fogja nekünk okzni, mint a felső kód!!!!
+                    yield delay(action.expirationTime);
+                    yield put(action.logout());
+                }
+            ! ez a checkAuthTimeout az action/auth.js-ben pedig a követekzőket fogja tartalmazni:
+                export const checkAuthTimeout = (expirationTime) => {
+                    return {
+                        type: actyionTypes.AUTH_CHECK_TIMEOUT,
+                        expirationTime: expirationTime
+                    };
+                }
+
+            ! létre kell hoznunk egy action típust is:
+                actyionTypes.js:
+                    ...
+                    export const AUTH_CHECK_TIMEOUT = 'AUTH_CHECK_TIMEOUT';
+                    ...
+
+            ! ahhoz, hogy ez az egész működjön, még ki kell egészíteni a saga/idex.js fájlt:
+                ...
+                import {logoutSaga, checkAuthTimeoutSaga} from './auth';
+                ...
+                export function* wathcAuth() {
+                    yield takeEvery(actyionTypes.AUTH_INITIATE_LOGOUT, logoutSaga);
+                    yield takeEvery(actyionTypes.AUTH_CHECK_TIMEOUT, checkAuthTimeoutSaga);
+                }
+
+418. Handling Authentication with a Saga
+    az előző óráon az auth action-ket szerveztük ki a sagaba
+    a login action-ket fojuk kiszervezni a saga-ba
+    elször csináljunk a saga/auth.js fájlba egy authUserSaga generátor fv-t:
+        ...
+        import axios from 'axios';
+        ...
+        export function* authUserSaga(action) {
+            yield put(actions.authStart());
+            const authData = {
+                email: action.email,
+                password: action.password,
+                returnSecureToken: true
+            };
+            let url = 'https://www.googleapis.com/identitytoolkit/v3/relyingparty/signupNewUser?key=AIzaSyCH067vUU9FF-06DqhJxTLCLSKTN0kLldY';
+            if (!action.isSignUp) {
+                url = 'https://www.googleapis.com/identitytoolkit/v3/relyingparty/verifyPassword?key=AIzaSyCH067vUU9FF-06DqhJxTLCLSKTN0kLldY';
+            }
+            try {
+                const response = yield axios.post(url, authData)
+                
+                const expirationDate = yield new Date(new Date().getTime() + response.data.expiresIn * 1000);
+                yield localStorage.setItem('token', response.data.idToken);
+                yield localStorage.setItem('expirationDate', expirationDate);
+                yield localStorage.setItem('userId', response.data.localId);
+                yield put(actions.authSuccess(response.data.idToken, response.data.localId));
+                yield put(actions.checkAuthTimeout(response.data.expiresIn));
+            } catch (error) {
+                yield put(actions.authFail(error.response.data.error));
+            }
+        }
+        ...
+
+    ! az action/index.js fájlba hozzáadunk egy authStart fv-t:
+        ...
+        export {
+            auth,
+            logout,
+            setAuthRedirectPath,
+            authCheckState,
+            logoutSucceed,
+            authStart,
+            authSucces,
+            checkAuthTimeout,
+            authFail
+        } from './auth';
+
+    !térjünk vissza az actino/auth.js fájlba ls változtatssuk meg az aut actionGenerátor fv tartalmát, úgy, hogy a saga-t használja
+        ...
+        export const auth = (email, password, isSignUp) => {
+            return {
+                type: actionTypes.AUTH_USER,
+                email: email,
+                password: password,
+                isSignUp: isSignUp
+            }
+        };
+        ...
+    ! miután ezt megtettük, hozzuk létre az új action típust:
+        actionTypes.js:
+            ...
+            export const AUTH_USER = 'AUTH_USER';
+            ...
+    
+    ! végezetűl a saga/index.js-ben hozzáadjuk a saga action figyelőt:
+        ...
+        import {logoutSaga, checkAuthTimeoutSaga, authUserSaga} from './auth';
+        ...
+        export function* wathcAuth() {
+            yield takeEvery(actyionTypes.AUTH_INITIATE_LOGOUT, logoutSaga);
+            yield takeEvery(actyionTypes.AUTH_CHECK_TIMEOUT, checkAuthTimeoutSaga);
+            yield takeEvery(actyionTypes.AUTH_USER, authUserSaga);
+        }
+
+    ! ennek köszönhetően be tud a user loginolni, de annyi a gond, hogy szinte azonnal ki is lép,
+    ! ezt meg tudjuk oldani, ha a saga/auth.js fájlban a checkAuthTimeoutSaga-ban a expirationTime-ot megszorozzuk 1000-el
+    ! ezt azért, hogy több időt tudjon a user elidőzni belépve:
+        ...
+        export function* checkAuthTimeoutSaga(action) {
+            yield delay(action.expirationTime * 1000);
+            yield put(actions.logout());
+        }
+        ...
+
+419. Handling Auto-Sign.In with a Saga
+    hátra maradt az akciók közül az authCkeckState ami a usert automatikusan belépteti
+    ezt a logikát is a saga-ban fogjuk tárolni, hogy a authCkeckState csak az akciót hívja meg
+    saga/auth.js:
+        export function* authCheckStateSaga(action) {
+            const token = yield localStorage.getItem('token');
+            if (!token) {
+                yield put(actions.logout());
+            } else {
+                const expirationDate = yield new Date(localStorage.getItem('expirationDate'));
+                if (expirationDate <= new Date()) {
+                yield put(actions.logout());
+                } else {
+                const userId = yield localStorage.getItem('userId');
+                yield put(actions.authSuccess(token, userId));
+                yield put(
+                    actions.checkAuthTimeout(
+                    (expirationDate.getTime() - new Date().getTime()) / 1000)
+                );
+                }
+            }
+        }
+    saga/index.js:
+        ...
+        import {logoutSaga, checkAuthTimeoutSaga, authUserSaga, authCheckStateSaga} from './auth';
+        ...
+        export function* wathcAuth() {
+            yield takeEvery(actyionTypes.AUTH_INITIATE_LOGOUT, logoutSaga);
+            yield takeEvery(actyionTypes.AUTH_CHECK_TIMEOUT, checkAuthTimeoutSaga);
+            yield takeEvery(actyionTypes.AUTH_USER, authUserSaga);
+            yield takeEvery(actionTypes.AUTH_CHECK_STATE, authCheckStateSaga);
+        }
+    actionTypes.js:
+        ...
+        export const AUTH_CHECK_STATE = 'AUTH_CHECK_STATE';
+        ...
+    action/auth.js:
+        export const authCheckState = () => {
+            return {
+                type: actionTypes.AUTH_CHECK_STATE
+            }
+        };
+
+420. Moving the BurgerBuilder Side Effects into Saga:
+    ebben ez episodban elkészítjük azokat a saga-kat amik az applikáció effektjeinek a logikáját tartalmazzák
+    szerencslre nem tartalmaz sok logikát ez a része a projektnek, egyet kivéve: initIngredient fv
+    ez futtat egy asyncron kódot, aminek van egy mellék eseménye
+    hozzunk létre e saga mappában egy bugerBuilder.js fájlt:
+    saga/burgerBuilder.js:
+        import { put } from "redux-saga/effects";
+        import axios from '../../axios-order';
+
+        import * as actions from '../actions';
+
+        export function* initIngredientsSaga(action) {
+            try {
+                const response = yield axios.get( 'https://react-my-burger-b7bf7.firebaseio.com/ingredients.json' );
+                yield put(actions.setIngredients(response.data));
+            } catch(error) {
+                yield put(actions.fetchIngredientsFailed());
+            }
+        }
+
+    saga/index.js:
+        ...
+        import { initIngredientsSaga } from './burgerBuilder';
+        ...
+        export function* watchBurgerBuilder() {
+            yield takeEvery(actionTypes.INIT_INGREDIENTS, initIngredientsSaga);
+        }
+        ...
+
+    action/burgerBuilder.js:
+        export const initIngredients = () => {
+            return {
+                type: actionTypes.INIT_INGREDIENTS
+            }
+        };
+
+    action/actionTypes.js:
+        ...
+        export const INIT_INGREDIENTS = 'INIT_INGREDIENTS';
+        ...
+
+    action/index.js:
+        export {
+            addIngredient,
+            removeIngredient,
+            initIngredients,
+            setIngredients,
+            fetchIngredientsFailed
+        } from './burgerBuilder';
+        ...
+
+    végezetűl a fő mappában (src) az index.js fájlba behelyezni:
+    index.js:
+        ...
+        import { watchAll, watchBurgerBuilder } from './store/sagas';
+        ...
+        const rootReducer = combineReducers({
+            burgerBuilder: burgerBuilderReducer,
+            auth: authReducer,
+        });
+        ...
+
+421. Moving the Orders Side Effects into sagas
+    Az order logika teljes átírás saga-ba, order.js(purchaseBurger, fetchBurget action-ök)
+    hozzunk létre egy order sagat, a saga mappában
+    saga/order.js:
+        import { put } from "redux-saga/effects";
+        import axios from '../../axios-order';
+
+        import * as actions from '../actions';
+
+        export function* purchaseBurgerSaga(action) {
+            yield put(actions.purchaseBurgerStart());
+            try {
+                const response = axios.post( '/orders.json?auth=' + action.token, action.orderData )
+                yield put(actions.purchaseBurgerSuccess(response.data.name, action.orderData));
+            } catch(error) {
+                yield put(actions.purchaseBurgerFail(error));
+            }
+        };
+
+        export function* fetchOrdersSaga(action) {
+            yield put(actions.fetchOrdersStart());
+
+            const queryParams = `?auth=${action.token}&orderBy="userId"&equalTo="${action.userId}"`;
+            try {
+                const response = yield axios.get('/orders.json' + queryParams)
+                const fetchedOrders = [];
+                for (let key in response.data) {
+                    fetchedOrders.push({
+                        ...response.data[key],
+                        id: key
+                    });
+                }
+                yield put(actions.fetchOrdersSuccess(fetchedOrders));
+            } catch (error) {
+                yield put(actions.fetchOrdersFail(error));
+            }
+        }
+
+    action/order.js:
+        ...
+        export const purchaseBurger = (orderData, token) => {
+            return {
+                type: actionTypes.PURCHASE_BURGER,
+                orderData: orderData,
+                token: token
+            }
+        };
+        ...
+        export const fetchOrders = (token, userId) => {
+            return {
+                type: actionTypes.FETCH_ORDERS,
+                toke: token,
+                userId: userId
+            }
+        };
+
+    action/actionTypes.js:
+        ...
+        export const PURCHASE_BURGER = 'PURCHASE_BURGER';
+        ...
+        export const FETCH_ORDERS = 'FETCH_ORDERS';
+        ...
+
+    action/index.js:
+        ...
+        export {
+            purchaseBurger,
+            purchaseInit,
+            fetchOrders,
+            purchaseBurgerStart,
+            purchaseBurgerFail,
+            purchaseBurgerSuccess,
+            fetchOrdersStart,
+            fetchOrdersFail,
+            fetchOrdersSuccess
+        } from './order';
+        ...
+
+    saga/index.js:
+        export function* watchOrder() {
+            yield takeLatest(actionTypes.INIT_INGREDIENTS, purchaseBurgerSaga);
+            yield takeEvery(actionTypes.FETCH_ORDERS, fetchOrdersSaga);
+        }
+
+    végül a src mappában található index.js fájlnak átadjuk az order sagákat:
+    src/index.js:
+        ...
+        import { watchAll, watchBurgerBuilder, watchOrder } from './store/sagas';
+        ...
+        const rootReducer = combineReducers({
+            burgerBuilder: burgerBuilderReducer,
+            order: orderReducer,
+            auth: authReducer,
+        });
+        ...
+
+422. why sagas can be helptful
+    nem fontos, a saga használata, de érdemes a logikát kiszervezni az actionGenerátorokból, 
+    hogy könnyebben értelmezhető átlátható kódot kapjunk
+
+423. diving deeper into sagas
+    call redux-saga beépített fv segítségével képesek vagyunk egy fv-t meghívni egy objektumon
+    pl.: sagas/auth.js:
+        ...
+        import { put, call } from "redux-saga/effects";
+        ...
+        export function* logoutSaga(action) {
+            yield call([localStorage, 'removeItem'], "token");
+            yield call([localStorage, 'removeItem'], "expirationDate");
+            yield call([localStorage, 'removeItem'], "userId");
+            yield put(actions.logoutSucceed());
+        }
+        ...
+
+        * a call fv első eleme egy tömb, amiben jelen esetben két elemet hívunk meg:
+            1. a használni kívánt csomag, vagy fv neve: lovalstorage
+            2. (string) a használni kívánt eleme belső fv-el
+        * a call fv második értéke pedig a használmni kívánt metódus, argumentumai, 
+        jelen esetben azt a localStorage hely, ami az adatot tárolja
+        természetesen ezt a call fv, bárhol használhatjuk, akár az axios esetén is.
+
+    az all metódus segítségével pedig csak egyszer kell meghívni a yield kúlcsszavat, mivel ez a fv,
+    egyesével fogja lefutatni azokat a meghívásokat, amiket beleinjektáltunk
+    pl.: sagas/index.js
+        import { takeEvery, all } from 'redux-saga/effects';
+        ...
+        export function* watchAll() {
+            yield all([
+                takeEvery(actionTypes.AUTH_INITIATE_LOGOUT, logoutSaga),
+                takeEvery(actionTypes.AUTH_CHECK_TIMEOUT, checkAuthTimeoutSaga),
+                takeEvery(actionTypes.AUTH_USER, authUserSaga),
+                takeEvery(actionTypes.AUTH_CHECK_STATE, authCheckStateSaga)
+            ])
+        }
+        ...
+
+    tehát az all fv segítségével egyidejűleg tudunk lefutatni kódokat!
+
+    takeLatest saga metódus arra a legjobb megoldás, ha többször is kattingatunk egy adot gonmbot amire valamilyen reakciót várunk,ú
+    zavaró lehet a rendszernek, ezért ezzel a metódussal, csak az utolsó reakciót fojuk figyelembe venni
+    pl.: sagas/index.js:
+        import { takeEvery, all, takeLatest } from 'redux-saga/effects';
+        ...
+        export function* watchOrder() {
+            yield takeLatest(actionTypes.INIT_INGREDIENTS, purchaseBurgerSaga);
+            yield takeEvery(actionTypes.FETCH_ORDERS, fetchOrdersSaga);
+        }
+
+    a takeLatest, töröl minden előző lefutást és csak az utolsó lefutást fogja végrtehajtani!
+
+Hasznos linkeke:
+https://redux-saga.js.org/
+https://redux-saga.js.org/docs/advanced/
+https://redux-saga.js.org/docs/api/
+pro/conts:
+https://stackoverflow.com/questions/34930735/pros-cons-of-using-redux-saga-with-es6-generators-vs-redux-thunk-with-es2017-asy/34933395

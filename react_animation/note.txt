@@ -1,0 +1,4 @@
+egyéb react animációs csomagok:
+1. react-motion
+2. react-move
+3. react-router-transition - oldal töltési animációra
